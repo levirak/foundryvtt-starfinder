@@ -3,11 +3,13 @@ import RollNode from "./rollnode.js";
 
 export default class RollTree {
     constructor(options = {}) {
+        this.options = options;
+
         /** @type {RollNode} */
         this.rootNode = null;
         /** @type {RollNode} */
         this.nodes = {};
-        this.options = options;
+        /** @type {SFRPGModifier[]} */
         this.rollMods = [];
     }
 
@@ -20,22 +22,19 @@ export default class RollTree {
      * @returns Stuff
      */
     async buildRoll(formula, contexts, callback) {
-        this.formula = formula;
-        this.contexts = contexts;
-
         /** Initialize selectors. */
-        if (this.contexts.selectors) {
-            for (const selector of this.contexts.selectors) {
+        if (contexts.selectors) {
+            for (const selector of contexts.selectors) {
                 const selectorTarget = selector.target;
                 const firstValue = selector.options[0];
                 if (selectorTarget && firstValue) {
-                    this.contexts.allContexts[selectorTarget] = this.contexts.allContexts[firstValue];
+                    contexts.allContexts[selectorTarget] = contexts.allContexts[firstValue];
                 }
             }
         }
 
         /** Verify variable contexts, replace bad ones with 0. */
-        const variableMatches = new Set(this.formula.match(/@([a-zA-Z.0-9_\-]+)/g));
+        const variableMatches = new Set(formula.match(/@([a-zA-Z.0-9_\-]+)/g));
         for (const variable of variableMatches) {
             const [context, remainingVariable] = RollNode.getContextForVariable(variable, contexts);
             if (!context) {
@@ -45,7 +44,7 @@ export default class RollTree {
             }
         }
 
-        const allRolledMods = this.populate();
+        const allRolledMods = this.populate(formula, contexts);
 
         let button, rollMode, bonus, enabledParts;
         if (this.options.skipUI) {
@@ -145,20 +144,22 @@ export default class RollTree {
         }
     }
 
-    populate() {
+    populate(formula, contexts) {
         if (this.options.debug) {
-            console.log(`Resolving '${this.formula}'`);
-            console.log(this.contexts);
+            console.log(`Resolving '${formula}'`);
+            console.log(contexts);
         }
 
-        this.rootNode = new RollNode(this, this.formula, null, null, false, true, null, this.options);
+        /* cache these for re-population */
+        this.formula = formula;
+        this.contexts = contexts;
+
+        this.rootNode = new RollNode(this, formula, null, null, false, true, null, this.options);
         this.nodes = {};
         this.rollMods = [];
 
-        this.nodes[this.formula] = this.rootNode;
-        this.rootNode.populate(this.nodes, this.contexts);
-
-        const allRolledMods = RollTree.getAllRolledModifiers(this.nodes);
+        this.nodes[formula] = this.rootNode;
+        this.rootNode.populate(this.nodes, contexts);
 
         for (const [key, value] of Object.entries(this.nodes)) {
             if (value.referenceModifier) {
@@ -167,15 +168,20 @@ export default class RollTree {
             if (value.calculatedMods) {
                 for (let calcModsI = 0; calcModsI < value.calculatedMods.length; calcModsI++) {
                     const mod = value.calculatedMods[calcModsI];
-                    if (this.rollMods.findIndex((x) => x.name === mod.bonus.name) === -1 && this.formula.indexOf(mod.bonus.name) === -1) {
+                    if (this.rollMods.findIndex((x) => x.name === mod.bonus.name) === -1 && formula.indexOf(mod.bonus.name) === -1) {
                         this.rollMods.push(mod.bonus);
                     }
                 }
             }
         }
 
-        const availableModifiers = [].concat(allRolledMods.map(x => x.referenceModifier));
-        return availableModifiers;
+        return Object.values(this.nodes)
+                .filter(x => x.referenceModifier !== null)
+                .map(x => x.referenceModifier);
+    }
+
+    repopulate() {
+        return populate(this.formula, this.contexts);
     }
 
     displayUI(formula, contexts, availableModifiers) {
@@ -195,9 +201,5 @@ export default class RollTree {
                 dialogOptions: this.options.dialogOptions,
                 parts: this.options.parts,
             });
-    }
-
-    static getAllRolledModifiers(nodes) {
-        return Object.values(nodes).filter(x => x.referenceModifier !== null);
     }
 }
