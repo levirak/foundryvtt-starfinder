@@ -54,8 +54,7 @@ export default class RollTree {
             const [context, remainingVariable] = RollNode.getContextForVariable(variable, contexts);
             if (!context) {
                 console.log(`Cannot find context for variable '${variable}', substituting with a 0.`);
-                const regexp = new RegExp(variable, "gi");
-                formula = formula.replace(regexp, "0");
+                formula = formula.replaceAll(variable, "0");
             }
         }
 
@@ -172,8 +171,7 @@ export default class RollTree {
                 this.rollMods.push(value.referenceModifier);
             }
             if (value.calculatedMods) {
-                for (let calcModsI = 0; calcModsI < value.calculatedMods.length; calcModsI++) {
-                    const mod = value.calculatedMods[calcModsI];
+                for (let mod of value.calculatedMods) {
                     if (this.rollMods.findIndex((x) => x.name === mod.bonus.name) === -1 && this.formula.indexOf(mod.bonus.name) === -1) {
                         this.rollMods.push(mod.bonus);
                     }
