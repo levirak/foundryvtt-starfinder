@@ -241,16 +241,6 @@ export class DiceSFRPG {
                 }
             }
 
-            // if (flavor) {
-            //     const chatData = {
-            //         type: CONST.CHAT_MESSAGE_STYLES.IC,
-            //         speaker: speaker,
-            //         content: flavor
-            //     };
-
-            //     ChatMessage.create(chatData, { chatBubble: true });
-            // }
-
             const itemContext = rollContext.allContexts['item'];
             const htmlData = [{ name: "rollNotes", value: itemContext?.system?.rollNotes }];
 
@@ -426,21 +416,6 @@ export class DiceSFRPG {
         const buttons = {
             Normal: { id: "normal", label: game.i18n.format("SFRPG.Rolls.Dice.NormalDamage"), tooltip: game.i18n.format("SFRPG.Rolls.Dice.NormalDamageTooltip") },
             Critical: { id: "critical", label: game.i18n.format("SFRPG.Rolls.Dice.CriticalDamage"), tooltip: game.i18n.format("SFRPG.Rolls.Dice.CriticalDamageTooltip") }
-        };
-
-        const getDamageTypeForPart = (part) => {
-            if (part.types && !foundry.utils.isEmpty(part.types)) {
-                const filteredTypes = Object.entries(part.types).filter(type => type[1]);
-                const obj = { types: [], operator: "" };
-
-                for (const type of filteredTypes) {
-                    obj.types.push(type[0]);
-                }
-
-                obj.operator = "and";
-
-                return obj;
-            }
         };
 
         /** @type {DamageType[]} */
