@@ -148,7 +148,7 @@ export default class RollTree {
         this.formula = formula;
         this.contexts = contexts;
 
-        this.rootNode = new RollNode(this, formula, null, null, false, true, null, this.options);
+        this.rootNode = new RollNode(formula, this, this.options);
         this.nodes = {};
         this.rollMods = [];
 
