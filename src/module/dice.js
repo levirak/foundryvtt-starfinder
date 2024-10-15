@@ -536,10 +536,6 @@ export class DiceSFRPG {
             }
         }
 
-        if (damageSections.length > 0) {
-            finalParts.unshift("<damageSection>");
-        }
-
         const formula = finalParts.join(" + ");
         const tree = new RollTree({
             debug: false,
