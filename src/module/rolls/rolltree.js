@@ -17,39 +17,27 @@ import RollNode from "./rollnode.js";
  */
 
 export default class RollTree {
-    constructor(options = {}) {
-        /** @type {RollNode} */
-        this.rootNode = null;
-        /** @type {RollNode} */
-        this.nodes = {};
-        this.options = options;
-        this.rollMods = [];
-    }
 
-    /**
-     * Method used to build the roll data needed for a Roll.
-     *
-     * @param {string} formula The formula for the Roll
-     * @param {RollContext} contexts The data context for this roll
-     * @returns {Promise<RollInfo>}
-     */
-    async buildRoll(formula, contexts) {
-        this.formula = formula;
-        this.contexts = contexts;
+    /** @type {RollNode} */
+    rootNode = null;
 
+    /** @type {RollNode} */
+    nodes = {};
+
+    constructor(formula, contexts, options = {}) {
         /** Initialize selectors. */
-        if (this.contexts.selectors) {
-            for (const selector of this.contexts.selectors) {
+        if (contexts.selectors) {
+            for (const selector of contexts.selectors) {
                 const selectorTarget = selector.target;
                 const firstValue = selector.options[0];
                 if (selectorTarget && firstValue) {
-                    this.contexts.allContexts[selectorTarget] = this.contexts.allContexts[firstValue];
+                    contexts.allContexts[selectorTarget] = contexts.allContexts[firstValue];
                 }
             }
         }
 
         /** Verify variable contexts, replace bad ones with 0. */
-        const variableMatches = new Set(this.formula.match(/@([a-zA-Z.0-9_\-]+)/g));
+        const variableMatches = new Set(formula.match(/@([a-zA-Z.0-9_\-]+)/g));
         for (const variable of variableMatches) {
             const [context, remainingVariable] = RollNode.getContextForVariable(variable, contexts);
             if (!context) {
@@ -59,27 +47,55 @@ export default class RollTree {
             }
         }
 
-        const allRolledMods = this.populate();
+        this.formula = formula;
+        this.options = options;
+
+        this.populate(contexts);
+    }
+
+    /**
+     * Method used to build the roll data needed for a Roll.
+     *
+     * @param {string} formula The formula for the Roll
+     * @param {RollContext} contexts The data context for this roll
+     * @param {Object} options
+     * @returns {Promise<RollInfo>}
+     */
+    static async buildRoll(formula, contexts, options) {
+        let tree = new RollTree(formula, contexts, options);
+        let allRolledMods = tree.getReferenceModifiers();
 
         let enabledParts;
         let result = {
             button: '',
             mode: '',
-            modifiers: this.rollMods,
+            modifiers: tree.getModifiers(),
             bonus: null,
             rolls: [],
         };
 
-        if (this.options.skipUI) {
-            result.button = this.options.defaultButton || (this.options.buttons ? (Object.values(this.options.buttons)[0].id ?? Object.values(this.options.buttons)[0].label) : "roll");
+        if (options.skipUI) {
+            result.button = options.defaultButton || (options.buttons ? (Object.values(options.buttons)[0].id ?? Object.values(options.buttons)[0].label) : "roll");
             result.mode = game.settings.get("core", "rollMode");
             result.bonus = null;
             // TODO(levirak): don't roll every part when skipping UI? (E.g., when holding SHIFT)
-            enabledParts = this.options.parts;
+            enabledParts = options.parts;
         } else {
-            let parts;
-            ({button: result.button, rollMode: result.mode, bonus: result.bonus, parts} = await this.displayUI(formula, contexts, allRolledMods));
-            enabledParts = parts?.filter(x => x.enabled);
+            if (options.debug) {
+                console.log(["Available modifiers", allRolledMods]);
+            }
+
+            let uiResult = await RollDialog.showRollDialog(tree, formula, contexts, allRolledMods, options.mainDie, {
+                buttons: options.buttons,
+                defaultButton: options.defaultButton,
+                title: options.title,
+                dialogOptions: options.dialogOptions,
+                parts: options.parts,
+            });
+            result.button = uiResult.button;
+            result.mode = uiResult.rollMode
+            result.bonus = uiResult.bonus;
+            enabledParts = uiResult.parts?.filter(part => part.enabled);
         }
 
         if (result.button === null) {
@@ -88,13 +104,13 @@ export default class RollTree {
             return result;
         }
 
-        for (const [key, value] of Object.entries(this.nodes)) {
+        for (const [key, value] of Object.entries(tree.nodes)) {
             if (value.referenceModifier) {
                 value.isEnabled = value.referenceModifier.enabled;
             }
         }
 
-        const finalRollFormula = this.rootNode.resolve(0, this.rollMods);
+        const finalRollFormula = tree.rootNode.resolve();
         if (enabledParts?.length > 0) {
             /* When the roll tree is passed parts, the primary formula & root node instead describes the bonuses that
              * are added to the primary section */
@@ -125,7 +141,7 @@ export default class RollTree {
                     part.partIndex = game.i18n.format("SFRPG.Damage.PartIndex", {partIndex: partIndex + 1, partCount: enabledParts.length});
                 }
 
-                if (this.options.debug) {
+                if (options.debug) {
                     console.log([`Final roll results outcome`, formula, allRolledMods, finalSectionFormula]);
                 }
 
@@ -142,69 +158,62 @@ export default class RollTree {
                 finalRollFormula.formula += game.i18n.format("SFRPG.Rolls.Dice.Formula.AdditionalBonus", { "bonus": result.bonus });
             }
 
-            if (this.options.debug) {
+            if (options.debug) {
                 console.log([`Final roll results outcome`, formula, allRolledMods, finalRollFormula]);
             }
 
-            result.rolls.push({ formula: finalRollFormula, node: this.rootNode });
+            result.rolls.push({ formula: finalRollFormula, node: tree.rootNode });
         }
 
         return result;
     }
 
-    populate() {
+    /**
+     * Populate `this.rootNode` and `this.nodes` with values according to `contexts`
+     * @param {RollContext} contexts The data context used to populate this tree's nodes
+     */
+    populate(contexts) {
         if (this.options.debug) {
             console.log(`Resolving '${this.formula}'`);
-            console.log(this.contexts);
+            console.log(contexts);
+            console.log(this.options);
         }
 
         this.rootNode = new RollNode(this.formula, this, this.options);
         this.nodes = {};
-        this.rollMods = [];
 
         this.nodes[this.formula] = this.rootNode;
-        this.rootNode.populate(this.nodes, this.contexts);
+        this.rootNode.populate(this.nodes, contexts);
+    }
 
-        const allRolledMods = RollTree.getAllRolledModifiers(this.nodes);
+    /**
+     * Get the reference modifiers from this objects nodes.
+     * @returns {SFRPGModifier[]}
+     */
+    getReferenceModifiers() {
+        return Object.values(this.nodes)
+            .filter(x => x.referenceModifier !== null)
+            .map(x => x.referenceModifier);
+    }
 
-        for (const [key, value] of Object.entries(this.nodes)) {
+    /**
+     * Get the reference and calculated modifiers from this objects nodes.
+     * @returns {SFRPGModifier[]}
+     */
+    getModifiers() {
+        let rollMods = [];
+        for (let value of Object.values(this.nodes)) {
             if (value.referenceModifier) {
-                this.rollMods.push(value.referenceModifier);
+                rollMods.push(value.referenceModifier);
             }
             if (value.calculatedMods) {
-                for (let calcModsI = 0; calcModsI < value.calculatedMods.length; calcModsI++) {
-                    const mod = value.calculatedMods[calcModsI];
-                    if (this.rollMods.findIndex((x) => x.name === mod.bonus.name) === -1 && this.formula.indexOf(mod.bonus.name) === -1) {
-                        this.rollMods.push(mod.bonus);
+                for (let mod of value.calculatedMods) {
+                    if (rollMods.findIndex((x) => x.name === mod.bonus.name) === -1 && this.formula.indexOf(mod.bonus.name) === -1) {
+                        rollMods.push(mod.bonus);
                     }
                 }
             }
         }
-
-        const availableModifiers = [].concat(allRolledMods.map(x => x.referenceModifier));
-        return availableModifiers;
-    }
-
-    displayUI(formula, contexts, availableModifiers) {
-        if (this.options.debug) {
-            console.log(["Available modifiers", availableModifiers]);
-        }
-        return RollDialog.showRollDialog(
-            this,
-            formula,
-            contexts,
-            availableModifiers,
-            this.options.mainDie,
-            {
-                buttons: this.options.buttons,
-                defaultButton: this.options.defaultButton,
-                title: this.options.title,
-                dialogOptions: this.options.dialogOptions,
-                parts: this.options.parts,
-            });
-    }
-
-    static getAllRolledModifiers(nodes) {
-        return Object.values(nodes).filter(x => x.referenceModifier !== null);
+        return rollMods;
     }
 }
